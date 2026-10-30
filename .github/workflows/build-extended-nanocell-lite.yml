@@ -53,6 +53,10 @@ jobs:
           print("WSOLA steps changed to 4/4; package ID set to com.alison.youtube.extended.lite.")
           PY
 
+      - name: Format app metadata
+        working-directory: app
+        run: npx prettier --write assets/appinfo.json
+
       - name: Run upstream tests
         working-directory: app
         run: npm test
