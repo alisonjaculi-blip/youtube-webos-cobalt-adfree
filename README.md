@@ -1,81 +1,52 @@
-# YouTube webOS Cobalt AdFree
+# YouTube Cobalt Plus (webOS)
 
-[![CI](https://github.com/RF1705/youtube-webos-cobalt-adfree/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RF1705/youtube-webos-cobalt-adfree/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/github/v/release/RF1705/youtube-webos-cobalt-adfree?label=latest%20release)](https://github.com/RF1705/youtube-webos-cobalt-adfree/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/RF1705/youtube-webos-cobalt-adfree/total?label=downloads)](https://github.com/RF1705/youtube-webos-cobalt-adfree/releases)
+Community fork of [RF1705/youtube-webos-cobalt-adfree](https://github.com/RF1705/youtube-webos-cobalt-adfree), maintained as a separate app variant for testing on LG webOS 25.
 
-Unofficial Cobalt-based YouTube modification for LG webOS TVs with ad blocking and SponsorBlock support.
+> Unofficial community build. Not affiliated with YouTube, Google, LG, or the upstream project.
 
-> This project is unofficial and is not affiliated with YouTube, Google, LG or webOS.
+## Variant identity
 
-![YouTube webOS Cobalt AdFree settings](docs/images/settings.webp)
+- Display name: **YouTube Cobalt Plus**
+- Application ID: `com.alison.youtube.cobaltplus`
+- Package version: `2.0.3`
+- Target test device: **LG 50NANO77SRA**, firmware **33.31.75**, webOS **25**
+- Upstream code base: this fork's `main` snapshot at the time this branch was created. The Cobalt engine and web app sources are retained; only the package identity and this documentation are customized in this branch.
 
-![YouTube playback with SponsorBlock segments and dislike counts](docs/images/playback.webp)
+## Important coexistence and casting note
 
-## Features
+This variant uses a different application ID from the stock YouTube app (`youtube.leanback.v4`). It is intended to install side-by-side and must not replace the stock app.
 
-- YouTube for LG webOS TVs
-- Advertisement blocking
-- SponsorBlock support
-- Return YouTube Dislike support
-- Automatic account selection on startup
-- Playback speed support
-- Optional Shorts visibility
-- Optional autostart integration
-- Installable `.ipk` package
+A custom application ID may prevent the YouTube mobile app from detecting this app as the built-in YouTube receiver for ordinary Cast / phone pairing. Do not assume phone casting, account transfer, or sign-in continuity with the stock app. Test sign-in and playback on the TV itself first. The original app remains available as a fallback.
 
-The configuration screen can be opened with the **GREEN** button on the LG remote.
-While a video is playing, press **1** to decrease playback speed or **3** to increase it. Press **0** to toggle subtitles.
+## Features inherited from upstream
 
-## Installation
+- Cobalt-based YouTube TV application
+- Ad blocking
+- SponsorBlock
+- Return YouTube Dislike
+- Automatic account selection
+- Playback speed controls (remote keys **1** and **3** during playback)
+- Optional Shorts visibility and autostart integration
 
-Download the current `.ipk` from the GitHub releases page and install it using Homebrew Channel, webOS Device Manager, `ares-cli`, or the webOS app install service on rooted devices.
+Feature availability and playback quality depend on the TV platform, firmware, Cobalt runtime and YouTube stream selection. 4K/HDR while playback is accelerated has not been verified on the target TV.
 
-The package uses the original `youtube.leanback.v4` application id to preserve YouTube sign-in and phone pairing compatibility. Installing it replaces the official YouTube application.
+## Build
 
-### Homebrew Channel repository
+The repository includes manual GitHub Actions workflows:
 
-Add the following custom repository in Homebrew Channel:
+1. **Actions → Build starterless Cobalt**: build the Cobalt runtime for the selected Cobalt ref and build type.
+2. **Actions → Package starterless Cobalt IPK**: enter the successful runtime workflow run ID to package the app using the identity in `starterless-cobalt/appinfo.json`.
 
-```text
-https://raw.githubusercontent.com/RF1705/youtube-webos-cobalt-adfree/main/repo.json
-```
+Use the same fork branch for both workflows. Keep debug options disabled for a normal test build. Verify the resulting IPK metadata and SHA-256 before installing.
 
-Do not install this package alongside another Homebrew package using the same `youtube.leanback.v4` application id.
+## Safety and testing
 
-## Building
+- Do not install an IPK whose app ID is `youtube.leanback.v4` if the goal is side-by-side coexistence.
+- Do not uninstall or overwrite the stock YouTube app as part of this test.
+- Verify package contents, app ID, executable permissions, runtime libraries and checksum before installation.
+- No claim is made that the build is malware-free solely because it compiles or passes CI; review dependencies and generated artifacts separately.
 
-Clone the repository:
+## Upstream
 
-```sh
-git clone https://github.com/RF1705/youtube-webos-cobalt-adfree.git
-cd youtube-webos-cobalt-adfree
-```
-
-The current Cobalt runtime is built directly for webOS and packaged without an LG Cobalt starter binary. Build helpers and platform patches are contained in `cobalt-platform/` and `scripts/`.
-
-Relevant build scripts include:
-
-- `scripts/build-starterless-cobalt-docker.sh` — builds Cobalt for webOS
-- `scripts/package-starterless-cobalt.sh` — creates the application package
-- `scripts/build-sdl-webos-docker.sh` — builds the SDL webOS platform dependency
-
-## Development
-
-The web application sources are in `webapp/`.
-
-Run the webapp tests with:
-
-```sh
-cd webapp
-npm install
-npm test
-```
-
-## Compatibility
-
-Compatibility depends on the webOS version, TV platform, firmware and Cobalt/Starboard runtime. Please use the issue tracker for current device reports and compatibility problems.
-
-## License
-
-See the repository license files for the licensing terms of the project and its components.
+- Source: https://github.com/RF1705/youtube-webos-cobalt-adfree
+- Upstream license files in this repository continue to apply. Preserve upstream attribution and license notices.
