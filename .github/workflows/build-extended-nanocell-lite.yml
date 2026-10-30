@@ -1,0 +1,78 @@
+name: Build YouTube Extended - NanoCell WSOLA Lite test
+
+on:
+  push:
+    branches:
+      - alison/extended-wsola-lite
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out build scripts
+        uses: actions/checkout@v4
+        with:
+          path: tooling
+
+      - name: Check out YouTube Extended 0.8.5 build 2
+        uses: actions/checkout@v4
+        with:
+          repository: NicholasBly/youtube-webos
+          ref: v0.8.5-b2
+          path: app
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci --ignore-scripts
+
+      - name: Apply NanoCell low-CPU WSOLA experiment
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/src/features/playback-speed/controller.js")
+          source = path.read_text(encoding="utf-8")
+          old = """searchStep: 2,
+                    corrStep: 2"""
+          new = """searchStep: 4,
+                    corrStep: 4"""
+          if source.count(old) != 1:
+              raise SystemExit("Expected WSOLA settings were not found exactly once; refusing to build an unexpected source.")
+          path.write_text(source.replace(old, new), encoding="utf-8")
+          print("WSOLA correlation/search steps changed from 2/2 to 4/4.")
+          PY
+
+      - name: Run upstream tests
+        working-directory: app
+        run: npm test
+
+      - name: Build webOS 22+ package
+        working-directory: app
+        env:
+          YTAF_BUILD: '3'
+        run: |
+          rm -f dist/*.ipk
+          npx webpack --mode=production --env modern --env build=3
+          mkdir -p out
+          npx ares-package -n dist -o out
+          ls -lh out
+          test -n "$(find out -maxdepth 1 -name '*.ipk' -print -quit)"
+
+      - name: Upload test IPK
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouTube-Extended-0.8.5-b3-NanoCell-WSOLA-lite
+          path: app/out/*.ipk
+          if-no-files-found: error
+          retention-days: 30
