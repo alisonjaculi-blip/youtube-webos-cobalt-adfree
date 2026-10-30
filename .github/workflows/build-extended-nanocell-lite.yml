@@ -31,20 +31,27 @@ jobs:
         working-directory: app
         run: npm ci --ignore-scripts
 
-      - name: Apply NanoCell low-CPU WSOLA experiment
+      - name: Apply NanoCell low-CPU WSOLA experiment and side-by-side app identity
         run: |
           python3 - <<'PY'
+          import json
           import re
           from pathlib import Path
 
-          path = Path("app/src/features/playback-speed/controller.js")
-          source = path.read_text(encoding="utf-8")
-          pattern = re.compile(r"searchStep: 2,\n([ \t]*)corrStep: 2")
-          patched, count = pattern.subn(r"searchStep: 4,\n\1corrStep: 4", source)
+          source_path = Path("app/src/features/playback-speed/controller.js")
+          source = source_path.read_text(encoding="utf-8")
+          pattern = re.compile(r"searchStep: 2,\\n([ \\t]*)corrStep: 2")
+          patched, count = pattern.subn(r"searchStep: 4,\\n\\1corrStep: 4", source)
           if count != 1:
               raise SystemExit(f"Expected one WSOLA setting pair, found {count}; refusing to build unexpected source.")
-          path.write_text(patched, encoding="utf-8")
-          print("WSOLA search/correlation steps changed from 2/2 to 4/4.")
+          source_path.write_text(patched, encoding="utf-8")
+
+          appinfo_path = Path("app/assets/appinfo.json")
+          appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
+          appinfo["id"] = "com.alison.youtube.extended.lite"
+          appinfo["title"] = "YouTube Extended Lite Test"
+          appinfo_path.write_text(json.dumps(appinfo, indent=2) + "\\n", encoding="utf-8")
+          print("WSOLA search/correlation steps: 4/4; package ID: com.alison.youtube.extended.lite")
           PY
 
       - name: Run upstream tests
