@@ -37,20 +37,20 @@ jobs:
           import json
           from pathlib import Path
 
-          source_path = Path("app/src/features/playback-speed/controller.js")
+          source_path = Path("app/src/vendor/playback-speed/audio-engine.js")
           source = source_path.read_text(encoding="utf-8")
-          if source.count("searchStep: 2,") != 1 or source.count("corrStep: 2") != 1:
-              raise SystemExit("Expected one WSOLA setting pair; refusing to build unexpected source.")
-          source = source.replace("searchStep: 2,", "searchStep: 4,")
-          source = source.replace("corrStep: 2", "corrStep: 4")
-          source_path.write_text(source, encoding="utf-8")
+          old = "searchStep: 2,\n          corrStep: 2"
+          new = "searchStep: 4,\n          corrStep: 4"
+          if source.count(old) != 1:
+              raise SystemExit("Expected one WSOLA search/correlation pair; refusing to build unexpected source.")
+          source_path.write_text(source.replace(old, new), encoding="utf-8")
 
           appinfo_path = Path("app/assets/appinfo.json")
           appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
           appinfo["id"] = "com.alison.youtube.extended.lite"
           appinfo["title"] = "YouTube Extended Lite Test"
           appinfo_path.write_text(json.dumps(appinfo, indent=2), encoding="utf-8")
-          print("WSOLA steps changed to 4/4; app ID set to com.alison.youtube.extended.lite.")
+          print("WSOLA steps changed to 4/4; package ID set to com.alison.youtube.extended.lite.")
           PY
 
       - name: Run upstream tests
