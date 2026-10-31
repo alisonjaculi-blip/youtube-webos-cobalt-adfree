@@ -109,6 +109,7 @@ jobs:
             if (typeof player.getAvailablePlaybackRates === 'function' && !player.__ytafRatesBound) {
               const originalRates = player.getAvailablePlaybackRates;
               player.__ytafOriginalGetAvailablePlaybackRates = originalRates;
+              /** Returns the expanded rates for YouTube's native speed menu. */
               player.getAvailablePlaybackRates = function () {
                 const nativeRates = originalRates.apply(this, arguments);
                 return isOn() ? SUPPORTED_SPEEDS.slice() : nativeRates;
@@ -157,8 +158,9 @@ jobs:
               "notes[notes.length - 1] === 'Playback speed 1.1x'"
           )
           tests = tests.replace(
-              "  ctrl.step(1);\\n  ctrl.step(1);\\n  eq('a burst of steps: 1.75x'",
-              "  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  eq('a burst of steps: 1.75x'"
+              "  eq('a burst of steps: 1.75x', ctrl.getSpeed(), 1.75);",
+              """  for (let i = 0; i < 5; i++) ctrl.step(1);
+          eq('a burst of steps: 1.75x', ctrl.getSpeed(), 1.75);"""
           )
           tests = tests.replace("for (let i = 0; i < 10; i++) ctrl.step(-1);", "for (let i = 0; i < 12; i++) ctrl.step(-1);")
           speed_menu_test = """// ---- expanded speed options ---------------------------------------------------------
