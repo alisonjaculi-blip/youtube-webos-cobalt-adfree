@@ -276,6 +276,7 @@ jobs:
             eq('if no compatible video alternative exists, formats are preserved', cap(noFallback, 48), 0);
             t('the only 60fps video is not discarded', noFallback.streamingData.adaptiveFormats.some((f) => f.fps === 60));
           }
+          """
 
           speed_menu_test = """// ---- expanded speed options ---------------------------------------------------------
           {
