@@ -1,4 +1,4 @@
-name: Build YouTube Extended - NanoCell AV sync compensation test
+name: Build YouTube Extended - NanoCell AV sync 250ms test
 
 on:
   push:
@@ -69,7 +69,7 @@ jobs:
           controller_path = Path("app/src/features/playback-speed/controller.js")
           controller = controller_path.read_text(encoding="utf-8")
           old_menu = "const MENU_SYNC_MS = 2500;"
-          new_menu = old_menu + "\n// Initial audio-output compensation for the NanoCell A/V sync test.\nconst AUDIO_OUTPUT_DELAY_MS = 100;"
+          new_menu = old_menu + "\n// Initial audio-output compensation for the NanoCell A/V sync test.\nconst AUDIO_OUTPUT_DELAY_MS = 250;"
           if controller.count(old_menu) != 1:
               raise SystemExit("Could not locate playback-speed controller constants.")
           controller = controller.replace(old_menu, new_menu)
@@ -116,9 +116,9 @@ jobs:
             const engine = new AudioEngine({
               win: fakeWindow,
               speed: 1.5,
-              extraDelayMs: 100
+              extraDelayMs: 250
             });
-            eq('100 ms A/V compensation is converted to 0.1 seconds', delayNode.delayTime.value, 0.1);
+            eq('250 ms A/V compensation is converted to 0.25 seconds', delayNode.delayTime.value, 0.25);
             t(
               'audio output is routed through the delay node before the speakers',
               connections.some((c) => c[0] === 'gain' && c[1] === delayNode) &&
@@ -135,7 +135,8 @@ jobs:
           appinfo_path = Path("app/assets/appinfo.json")
           appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
           appinfo["id"] = "com.alison.youtube.extended.lite"
-          appinfo["title"] = "YouTube Extended Sync Test"
+          appinfo["title"] = "YouTube Extended Sync 250ms"
+          appinfo["version"] = "0.8.6"
           appinfo_path.write_text(json.dumps(appinfo, indent=2), encoding="utf-8")
           print("WSOLA 4/4 retained; 100 ms audio output delay wired; app identity isolated.")
           PY
@@ -156,7 +157,7 @@ jobs:
         working-directory: app
         run: |
           rm -f dist/*.ipk
-          npx webpack --mode=production --env modern --env build=4
+          npx webpack --mode=production --env modern --env build=5
           mkdir -p out
           npx ares-package -n dist -o out
           ls -lh out
@@ -165,7 +166,7 @@ jobs:
       - name: Upload test IPK
         uses: actions/upload-artifact@v4
         with:
-          name: YouTube-Extended-0.8.5-b4-NanoCell-AV-Sync-100ms
+          name: YouTube-Extended-0.8.6-b5-NanoCell-AV-Sync-250ms
           path: app/out/*.ipk
           if-no-files-found: error
           retention-days: 30
