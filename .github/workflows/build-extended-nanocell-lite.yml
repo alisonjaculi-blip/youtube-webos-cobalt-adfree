@@ -1,4 +1,4 @@
-name: Build YouTube Extended - NanoCell speed-dependent AV sync test
+name: Build YouTube Extended - NanoCell extended playback speeds
 
 on:
   push:
@@ -66,10 +66,75 @@ jobs:
               raise SystemExit("Expected the original AudioEngine output route exactly once.")
           audio_path.write_text(audio.replace(old_route, new_route), encoding="utf-8")
 
+          # Add finer playback speed increments while keeping all original options.
+          speed_path = Path("app/src/vendor/playback-speed/mse-hook.js")
+          speed_source = speed_path.read_text(encoding="utf-8")
+          old_speeds = "export const SUPPORTED_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];"
+          new_speeds = "export const SUPPORTED_SPEEDS = [0.25, 0.5, 0.75, 1, 1.1, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.75, 2];"
+          if speed_source.count(old_speeds) != 1:
+              raise SystemExit("Could not locate supported playback speed list.")
+          speed_path.write_text(speed_source.replace(old_speeds, new_speeds), encoding="utf-8")
+
+          # Expose the expanded list through YouTube's own player API so its
+          # native Speed menu can render the additional choices.
+          menu_path = Path("app/src/features/playback-speed/native-menu.js")
+          menu_source = menu_path.read_text(encoding="utf-8")
+          old_import = "import { isSupportedSpeed } from '../../vendor/playback-speed/mse-hook.js';"
+          new_import = "import { isSupportedSpeed, SUPPORTED_SPEEDS } from '../../vendor/playback-speed/mse-hook.js';"
+          if menu_source.count(old_import) != 1:
+              raise SystemExit("Could not locate native menu speed import.")
+          menu_source = menu_source.replace(old_import, new_import)
+          old_bind = """export function bindPlayerRate(player, controller) {
+            if (!player || typeof player.setPlaybackRate !== 'function' || player.__ytafSpeedBound) {
+              return false;
+            }
+            const original = player.setPlaybackRate;
+            player.__ytafOriginalSetPlaybackRate = original.__ytafUnwrapped || original;
+            if (!original.__ytafUnwrapped) player.setPlaybackRate = wrapRate(original, controller);
+            player.__ytafSpeedBound = true;
+            return true;
+          }"""
+          new_bind = """export function bindPlayerRate(player, controller, isOn = () => true) {
+            if (!player) return false;
+            let bound = false;
+
+            if (typeof player.setPlaybackRate === 'function' && !player.__ytafSpeedBound) {
+              const original = player.setPlaybackRate;
+              player.__ytafOriginalSetPlaybackRate = original.__ytafUnwrapped || original;
+              if (!original.__ytafUnwrapped) player.setPlaybackRate = wrapRate(original, controller);
+              player.__ytafSpeedBound = true;
+              bound = true;
+            }
+
+            if (typeof player.getAvailablePlaybackRates === 'function' && !player.__ytafRatesBound) {
+              const originalRates = player.getAvailablePlaybackRates;
+              player.__ytafOriginalGetAvailablePlaybackRates = originalRates;
+              player.getAvailablePlaybackRates = function () {
+                const nativeRates = originalRates.apply(this, arguments);
+                return isOn() ? SUPPORTED_SPEEDS.slice() : nativeRates;
+              };
+              player.__ytafRatesBound = true;
+              bound = true;
+            }
+
+            return bound;
+          }"""
+          if menu_source.count(old_bind) != 1:
+              raise SystemExit("Could not locate player-rate binding function.")
+          menu_path.write_text(menu_source.replace(old_bind, new_bind), encoding="utf-8")
+
+          index_path = Path("app/src/features/playback-speed/index.js")
+          index_source = index_path.read_text(encoding="utf-8")
+          old_call = "bindPlayerRate(getPlayer(), controller)"
+          new_call = "bindPlayerRate(getPlayer(), controller, isOn)"
+          if index_source.count(old_call) != 1:
+              raise SystemExit("Could not locate player-rate binding call.")
+          index_path.write_text(index_source.replace(old_call, new_call), encoding="utf-8")
+
           controller_path = Path("app/src/features/playback-speed/controller.js")
           controller = controller_path.read_text(encoding="utf-8")
           old_menu = "const MENU_SYNC_MS = 2500;"
-          new_menu = old_menu + "\n// Speed-specific audio-output compensation for the NanoCell A/V sync test.\n// 1.25x was slightly late at 350ms, so start at 325ms; other accelerated speeds retain 350ms until calibrated.\nconst getAudioOutputDelayMs = (speed) => Math.abs(speed - 1.25) < 0.001 ? 325 : 350;"
+          new_menu = old_menu + "\n// Speed-specific audio-output compensation for the NanoCell A/V sync test.\n// 1.25x was slightly late at 350ms, so start at 325ms; other accelerated speeds retain 350ms until calibrated.\nconst getAudioOutputDelayMs = (speed) => speed > 1 && speed < 1.35 ? 325 : 350;"
           if controller.count(old_menu) != 1:
               raise SystemExit("Could not locate playback-speed controller constants.")
           controller = controller.replace(old_menu, new_menu)
@@ -83,6 +148,42 @@ jobs:
           test_path = Path("app/tests/unit/playback-speed-test.cjs")
           tests = test_path.read_text(encoding="utf-8")
           marker = "report.finish();"
+          tests = tests.replace(
+              "eq('one step up: 1.25x', ctrl.getSpeed(), 1.25);",
+              "eq('one step up: 1.1x', ctrl.getSpeed(), 1.1);"
+          )
+          tests = tests.replace(
+              "notes[notes.length - 1] === 'Playback speed 1.25x'",
+              "notes[notes.length - 1] === 'Playback speed 1.1x'"
+          )
+          tests = tests.replace(
+              "  ctrl.step(1);\\n  ctrl.step(1);\\n  eq('a burst of steps: 1.75x'",
+              "  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  ctrl.step(1);\\n  eq('a burst of steps: 1.75x'"
+          )
+          tests = tests.replace("for (let i = 0; i < 10; i++) ctrl.step(-1);", "for (let i = 0; i < 12; i++) ctrl.step(-1);")
+          const speedMenuTest = """// ---- expanded speed options ---------------------------------------------------------
+          {
+            const { get } = load();
+            const expected = [0.25, 0.5, 0.75, 1, 1.1, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.75, 2];
+            const speeds = get('SUPPORTED_SPEEDS');
+            eq('expanded supported speed list', JSON.stringify(speeds), JSON.stringify(expected));
+            t('1.1x and 1.6x are accepted by the speed engine', get('isSupportedSpeed')(1.1) && get('isSupportedSpeed')(1.6));
+
+            const nativeRates = [0.5, 1, 2];
+            const player = {
+              setPlaybackRate() {},
+              getAvailablePlaybackRates() { return nativeRates; }
+            };
+            let enabled = true;
+            const controller = { getSpeed: () => 1, lastReloadAt: () => 0, setSpeed() {} };
+            get('bindPlayerRate')(player, controller, () => enabled);
+            eq('YouTube speed menu receives all expanded choices', JSON.stringify(player.getAvailablePlaybackRates()), JSON.stringify(expected));
+            enabled = false;
+            eq('native rates return when the feature is turned off', JSON.stringify(player.getAvailablePlaybackRates()), JSON.stringify(nativeRates));
+          }
+
+          """
+          tests = tests.replace(marker, speedMenuTest + marker)
           test = """// ---- audio output delay ------------------------------------------------------------
           {
             const { get } = load();
@@ -135,10 +236,10 @@ jobs:
           appinfo_path = Path("app/assets/appinfo.json")
           appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
           appinfo["id"] = "com.alison.youtube.extended.lite"
-          appinfo["title"] = "YouTube Extended Sync Variable b7"
-          appinfo["version"] = "0.8.8"
+          appinfo["title"] = "YouTube Extended Sync Speeds b8"
+          appinfo["version"] = "0.8.9"
           appinfo_path.write_text(json.dumps(appinfo, indent=2), encoding="utf-8")
-          print("WSOLA 4/4 retained; speed-specific audio delay wired (325 ms at 1.25x, 350 ms otherwise); app identity isolated.")
+          print("WSOLA 4/4 retained; 13 playback speeds exposed; 325 ms near 1.25x and 350 ms elsewhere; app identity isolated.")
           PY
 
       - name: Format changed source and app metadata
@@ -157,7 +258,7 @@ jobs:
         working-directory: app
         run: |
           rm -f dist/*.ipk
-          npx webpack --mode=production --env modern --env build=7
+          npx webpack --mode=production --env modern --env build=8
           mkdir -p out
           npx ares-package -n dist -o out
           ls -lh out
@@ -166,7 +267,7 @@ jobs:
       - name: Upload test IPK
         uses: actions/upload-artifact@v4
         with:
-          name: YouTube-Extended-0.8.8-b7-NanoCell-AV-Sync-Variable
+          name: YouTube-Extended-0.8.9-b8-NanoCell-Expanded-Speeds
           path: app/out/*.ipk
           if-no-files-found: error
           retention-days: 30
