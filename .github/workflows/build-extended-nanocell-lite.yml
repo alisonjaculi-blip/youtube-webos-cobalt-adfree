@@ -179,7 +179,7 @@ jobs:
           index_source = index_source.replace(old_call, new_call)
 
           old_frame_import = "import { setParsedObjectStep } from '../adblock/parse-hook.js';"
-          new_frame_import = old_frame_import + "\\nimport { capVideoFrameRate } from './frame-rate-cap.js';"
+          new_frame_import = old_frame_import + "\nimport { capVideoFrameRate } from './frame-rate-cap.js';"
           if index_source.count(old_frame_import) != 1:
               raise SystemExit("Could not locate parsed response hook import.")
           index_source = index_source.replace(old_frame_import, new_frame_import)
@@ -226,7 +226,7 @@ jobs:
           test_path = Path("app/tests/unit/playback-speed-test.cjs")
           tests = test_path.read_text(encoding="utf-8")
           marker = "report.finish();"
-          tests = tests.replace("VENDOR('wsola.js'),", "VENDOR('wsola.js'),\\n      FEATURE('frame-rate-cap.js'),")
+          tests = tests.replace("VENDOR('wsola.js'),", "VENDOR('wsola.js'),\n      FEATURE('frame-rate-cap.js'),")
           tests = tests.replace(
               "eq('one step up: 1.25x', ctrl.getSpeed(), 1.25);",
               "eq('one step up: 1.1x', ctrl.getSpeed(), 1.1);"
