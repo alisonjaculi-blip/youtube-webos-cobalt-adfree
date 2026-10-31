@@ -27,6 +27,10 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci --ignore-scripts
+
       - name: Apply NanoCell audio sync compensation and side-by-side app identity
         run: |
           python3 - <<'PY'
@@ -81,6 +85,7 @@ jobs:
           marker = "report.finish();"
           test = """// ---- audio output delay ------------------------------------------------------------
           {
+            const { get } = load();
             const AudioEngine = get('AudioEngine');
             const destination = {};
             const connections = [];
@@ -138,6 +143,10 @@ jobs:
       - name: Format changed source and app metadata
         working-directory: app
         run: npx prettier --write src/vendor/playback-speed/audio-engine.js src/features/playback-speed/controller.js tests/unit/playback-speed-test.cjs assets/appinfo.json
+
+      - name: Regenerate code map after source changes
+        working-directory: app
+        run: npm run codemap
 
       - name: Run upstream tests
         working-directory: app
