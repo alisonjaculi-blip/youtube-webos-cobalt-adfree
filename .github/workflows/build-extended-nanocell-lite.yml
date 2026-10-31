@@ -1,4 +1,4 @@
-name: Build YouTube Extended - NanoCell WSOLA Lite test
+name: Build YouTube Extended - NanoCell AV sync compensation test
 
 on:
   push:
@@ -27,35 +27,117 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
 
-      - name: Install dependencies
-        working-directory: app
-        run: npm ci --ignore-scripts
-
-      - name: Apply NanoCell low-CPU WSOLA experiment and side-by-side app identity
+      - name: Apply NanoCell audio sync compensation and side-by-side app identity
         run: |
           python3 - <<'PY'
           import json
           from pathlib import Path
 
-          source_path = Path("app/src/vendor/playback-speed/audio-engine.js")
-          source = source_path.read_text(encoding="utf-8")
-          old = "searchStep: 2,\n          corrStep: 2"
-          new = "searchStep: 4,\n          corrStep: 4"
-          if source.count(old) != 1:
-              raise SystemExit("Expected one WSOLA search/correlation pair; refusing to build unexpected source.")
-          source_path.write_text(source.replace(old, new), encoding="utf-8")
+          # Keep the lighter WSOLA processing from b3.
+          audio_path = Path("app/src/vendor/playback-speed/audio-engine.js")
+          audio = audio_path.read_text(encoding="utf-8")
+          old_wsola = "searchStep: 2,\n          corrStep: 2"
+          new_wsola = "searchStep: 4,\n          corrStep: 4"
+          if audio.count(old_wsola) != 1:
+              raise SystemExit("Expected one WSOLA pair; refusing unexpected source.")
+          audio = audio.replace(old_wsola, new_wsola)
+
+          # The upstream constructor already accepted extraDelayMs but did not
+          # route audio through a DelayNode. Apply the requested output offset.
+          old_route = "this.gain = this.ctx.createGain();\n    this.gain.connect(this.ctx.destination);"
+          new_route = """this.gain = this.ctx.createGain();
+              const delaySeconds = Math.max(
+                0,
+                Math.min(1, this.extraDelayMs / 1000)
+              );
+              if (delaySeconds > 0 && typeof this.ctx.createDelay === 'function') {
+                const outputDelay = this.ctx.createDelay(1);
+                outputDelay.delayTime.value = delaySeconds;
+                this.gain.connect(outputDelay);
+                outputDelay.connect(this.ctx.destination);
+              } else {
+                this.gain.connect(this.ctx.destination);
+              }"""
+          if audio.count(old_route) != 1:
+              raise SystemExit("Expected the original AudioEngine output route exactly once.")
+          audio_path.write_text(audio.replace(old_route, new_route), encoding="utf-8")
+
+          controller_path = Path("app/src/features/playback-speed/controller.js")
+          controller = controller_path.read_text(encoding="utf-8")
+          old_menu = "const MENU_SYNC_MS = 2500;"
+          new_menu = old_menu + "\n// Initial audio-output compensation for the NanoCell A/V sync test.\nconst AUDIO_OUTPUT_DELAY_MS = 100;"
+          if controller.count(old_menu) != 1:
+              raise SystemExit("Could not locate playback-speed controller constants.")
+          controller = controller.replace(old_menu, new_menu)
+          old_engine = "const engine = new AudioEngine({ win: window, speed, onError });"
+          new_engine = "const engine = new AudioEngine({ win: window, speed, extraDelayMs: AUDIO_OUTPUT_DELAY_MS, onError });"
+          if controller.count(old_engine) != 1:
+              raise SystemExit("Could not locate AudioEngine creation.")
+          controller_path.write_text(controller.replace(old_engine, new_engine), encoding="utf-8")
+
+          # Add a unit test that verifies the audio graph uses the delay node.
+          test_path = Path("app/tests/unit/playback-speed-test.cjs")
+          tests = test_path.read_text(encoding="utf-8")
+          marker = "report.finish();"
+          test = """// ---- audio output delay ------------------------------------------------------------
+          {
+            const AudioEngine = get('AudioEngine');
+            const destination = {};
+            const connections = [];
+            const delayNode = {
+              delayTime: { value: 0 },
+              connect: (node) => connections.push(['delay', node])
+            };
+            const gainNode = {
+              gain: { value: 1 },
+              connect: (node) => connections.push(['gain', node])
+            };
+            const context = {
+              currentTime: 0,
+              state: 'running',
+              destination,
+              createGain: () => gainNode,
+              createDelay: (max) => {
+                connections.push(['createDelay', max]);
+                return delayNode;
+              },
+              close: () => {}
+            };
+            const fakeWindow = {
+              AudioContext: function () { return context; },
+              setInterval: () => 1,
+              clearInterval: () => {}
+            };
+            const engine = new AudioEngine({
+              win: fakeWindow,
+              speed: 1.5,
+              extraDelayMs: 100
+            });
+            eq('100 ms A/V compensation is converted to 0.1 seconds', delayNode.delayTime.value, 0.1);
+            t(
+              'audio output is routed through the delay node before the speakers',
+              connections.some((c) => c[0] === 'gain' && c[1] === delayNode) &&
+                connections.some((c) => c[0] === 'delay' && c[1] === destination)
+            );
+            engine.destroy();
+          }
+
+          """
+          if tests.count(marker) != 1:
+              raise SystemExit("Could not locate unit test report end.")
+          test_path.write_text(tests.replace(marker, test + marker), encoding="utf-8")
 
           appinfo_path = Path("app/assets/appinfo.json")
           appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
           appinfo["id"] = "com.alison.youtube.extended.lite"
-          appinfo["title"] = "YouTube Extended Lite Test"
+          appinfo["title"] = "YouTube Extended Sync Test"
           appinfo_path.write_text(json.dumps(appinfo, indent=2), encoding="utf-8")
-          print("WSOLA steps changed to 4/4; package ID set to com.alison.youtube.extended.lite.")
+          print("WSOLA 4/4 retained; 100 ms audio output delay wired; app identity isolated.")
           PY
 
-      - name: Format app metadata
+      - name: Format changed source and app metadata
         working-directory: app
-        run: npx prettier --write assets/appinfo.json
+        run: npx prettier --write src/vendor/playback-speed/audio-engine.js src/features/playback-speed/controller.js tests/unit/playback-speed-test.cjs assets/appinfo.json
 
       - name: Run upstream tests
         working-directory: app
@@ -65,7 +147,7 @@ jobs:
         working-directory: app
         run: |
           rm -f dist/*.ipk
-          npx webpack --mode=production --env modern --env build=3
+          npx webpack --mode=production --env modern --env build=4
           mkdir -p out
           npx ares-package -n dist -o out
           ls -lh out
@@ -74,7 +156,7 @@ jobs:
       - name: Upload test IPK
         uses: actions/upload-artifact@v4
         with:
-          name: YouTube-Extended-0.8.5-b3-NanoCell-WSOLA-lite
+          name: YouTube-Extended-0.8.5-b4-NanoCell-AV-Sync-100ms
           path: app/out/*.ipk
           if-no-files-found: error
           retention-days: 30
