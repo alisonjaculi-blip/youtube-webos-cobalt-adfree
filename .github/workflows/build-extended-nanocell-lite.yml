@@ -191,7 +191,7 @@ jobs:
             } catch (e) {
               log.warn('Speed button:', e.message);
             }
-          });"""
+            });"""
           new_parsed_step = """  setParsedObjectStep((data) => {
             if (!isOn()) return;
             try {
@@ -204,7 +204,7 @@ jobs:
             } catch (e) {
               log.warn('Speed/frame-rate cap:', e.message);
             }
-          });"""
+            });"""
           if index_source.count(old_parsed_step) != 1:
               raise SystemExit("Could not locate parsed response callback.")
           index_path.write_text(index_source.replace(old_parsed_step, new_parsed_step), encoding="utf-8")
