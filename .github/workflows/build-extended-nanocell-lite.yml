@@ -1,4 +1,4 @@
-name: Build YouTube Extended - NanoCell extended playback speeds
+name: Build YouTube Extended - NanoCell adaptive frame-rate playback
 
 on:
   push:
@@ -75,6 +75,52 @@ jobs:
               raise SystemExit("Could not locate supported playback speed list.")
           speed_path.write_text(speed_source.replace(old_speeds, new_speeds), encoding="utf-8")
 
+          # Keep source frame cadence within the TV's 60 Hz output budget.
+          frame_cap_path = Path("app/src/features/playback-speed/frame-rate-cap.js")
+          frame_cap_source = """/**
+           * Removes video formats whose time-scaled cadence exceeds maxFps.
+           */
+          function capFormatList(formats, maxFps) {
+            if (!Array.isArray(formats)) return 0;
+            /** Identifies video formats without matching audio-only formats. */
+            const isVideo = (format) =>
+              !!format &&
+              ((typeof format.mimeType === 'string' &&
+                format.mimeType.toLowerCase().startsWith('video/')) ||
+                (Number(format.width) > 0 && Number(format.height) > 0));
+            const videoFormats = formats.filter(isVideo);
+            const compatibleVideo = videoFormats.filter((format) => {
+              const fps = Number(format.fps);
+              return !Number.isFinite(fps) || fps <= maxFps;
+            });
+            // Never leave YouTube with no video alternative in this list.
+            if (compatibleVideo.length === 0) return 0;
+            const kept = formats.filter((format) => {
+              if (!isVideo(format)) return true;
+              const fps = Number(format.fps);
+              return !Number.isFinite(fps) || fps <= maxFps;
+            });
+            const removed = formats.length - kept.length;
+            if (removed > 0) formats.splice(0, formats.length, ...kept);
+            return removed;
+          }
+
+          /**
+           * Caps muxed and adaptive video formats in an InnerTube player response.
+           */
+          export function capVideoFrameRate(response, maxFps) {
+            if (!response || !Number.isFinite(maxFps) || maxFps <= 0) return 0;
+            const playerResponse = response.playerResponse || response;
+            const streamingData = playerResponse && playerResponse.streamingData;
+            if (!streamingData) return 0;
+            return (
+              capFormatList(streamingData.adaptiveFormats, maxFps) +
+              capFormatList(streamingData.formats, maxFps)
+            );
+          }
+          """
+          frame_cap_path.write_text(frame_cap_source, encoding="utf-8")
+
           # Expose the expanded list through YouTube's own player API so its
           # native Speed menu can render the additional choices.
           menu_path = Path("app/src/features/playback-speed/native-menu.js")
@@ -130,7 +176,38 @@ jobs:
           new_call = "bindPlayerRate(getPlayer(), controller, isOn)"
           if index_source.count(old_call) != 1:
               raise SystemExit("Could not locate player-rate binding call.")
-          index_path.write_text(index_source.replace(old_call, new_call), encoding="utf-8")
+          index_source = index_source.replace(old_call, new_call)
+
+          old_frame_import = "import { setParsedObjectStep } from '../adblock/parse-hook.js';"
+          new_frame_import = old_frame_import + "\\nimport { capVideoFrameRate } from './frame-rate-cap.js';"
+          if index_source.count(old_frame_import) != 1:
+              raise SystemExit("Could not locate parsed response hook import.")
+          index_source = index_source.replace(old_frame_import, new_frame_import)
+
+          old_parsed_step = """  setParsedObjectStep((data) => {
+            if (!isOn()) return;
+            try {
+              enableSpeedButton(data);
+            } catch (e) {
+              log.warn('Speed button:', e.message);
+            }
+          });"""
+          new_parsed_step = """  setParsedObjectStep((data) => {
+            if (!isOn()) return;
+            try {
+              enableSpeedButton(data);
+              const speed = controller.getSpeed();
+              if (speed > 1) {
+                // Limit source fps so accelerated cadence stays within 60 Hz.
+                capVideoFrameRate(data, 60 / speed);
+              }
+            } catch (e) {
+              log.warn('Speed/frame-rate cap:', e.message);
+            }
+          });"""
+          if index_source.count(old_parsed_step) != 1:
+              raise SystemExit("Could not locate parsed response callback.")
+          index_path.write_text(index_source.replace(old_parsed_step, new_parsed_step), encoding="utf-8")
 
           controller_path = Path("app/src/features/playback-speed/controller.js")
           controller = controller_path.read_text(encoding="utf-8")
@@ -149,6 +226,7 @@ jobs:
           test_path = Path("app/tests/unit/playback-speed-test.cjs")
           tests = test_path.read_text(encoding="utf-8")
           marker = "report.finish();"
+          tests = tests.replace("VENDOR('wsola.js'),", "VENDOR('wsola.js'),\\n      FEATURE('frame-rate-cap.js'),")
           tests = tests.replace(
               "eq('one step up: 1.25x', ctrl.getSpeed(), 1.25);",
               "eq('one step up: 1.1x', ctrl.getSpeed(), 1.1);"
@@ -163,6 +241,42 @@ jobs:
           eq('a burst of steps: 1.75x', ctrl.getSpeed(), 1.75);"""
           )
           tests = tests.replace("for (let i = 0; i < 10; i++) ctrl.step(-1);", "for (let i = 0; i < 12; i++) ctrl.step(-1);")
+          frame_rate_test = """// ---- speed-aware source frame-rate cap ---------------------------------------------
+          {
+            const { get } = load();
+            const cap = get('capVideoFrameRate');
+            const response = {
+              playerResponse: {
+                streamingData: {
+                  adaptiveFormats: [
+                    { itag: 1, mimeType: 'video/mp4; codecs="avc1"', width: 1920, height: 1080, fps: 60 },
+                    { itag: 2, mimeType: 'video/mp4; codecs="avc1"', width: 1920, height: 1080, fps: 30 },
+                    { itag: 3, mimeType: 'audio/mp4; codecs="mp4a"' }
+                  ],
+                  formats: [
+                    { itag: 4, mimeType: 'video/mp4; codecs="avc1"', width: 1920, height: 1080, fps: 60 },
+                    { itag: 5, mimeType: 'video/mp4; codecs="avc1"', width: 1920, height: 1080, fps: 30 }
+                  ]
+                }
+              }
+            };
+            eq('at 1.25x, 60fps video choices are removed from both lists', cap(response, 48), 2);
+            t('1080p30 remains available', response.playerResponse.streamingData.adaptiveFormats.some((f) => f.height === 1080 && f.fps === 30));
+            t('audio formats are preserved', response.playerResponse.streamingData.adaptiveFormats.some((f) => f.mimeType.startsWith('audio/')));
+            t('the muxed 1080p60 option is removed', !response.playerResponse.streamingData.formats.some((f) => f.fps === 60));
+
+            const noFallback = {
+              streamingData: {
+                adaptiveFormats: [
+                  { itag: 6, mimeType: 'video/mp4', width: 1920, height: 1080, fps: 60 },
+                  { itag: 7, mimeType: 'audio/mp4' }
+                ]
+              }
+            };
+            eq('if no compatible video alternative exists, formats are preserved', cap(noFallback, 48), 0);
+            t('the only 60fps video is not discarded', noFallback.streamingData.adaptiveFormats.some((f) => f.fps === 60));
+          }
+
           speed_menu_test = """// ---- expanded speed options ---------------------------------------------------------
           {
             const { get } = load();
@@ -185,7 +299,7 @@ jobs:
           }
 
           """
-          tests = tests.replace(marker, speed_menu_test + marker)
+          tests = tests.replace(marker, frame_rate_test + speed_menu_test + marker)
           test = """// ---- audio output delay ------------------------------------------------------------
           {
             const { get } = load();
@@ -238,15 +352,15 @@ jobs:
           appinfo_path = Path("app/assets/appinfo.json")
           appinfo = json.loads(appinfo_path.read_text(encoding="utf-8"))
           appinfo["id"] = "com.alison.youtube.extended.lite"
-          appinfo["title"] = "YouTube Extended Sync Speeds b8"
-          appinfo["version"] = "0.8.9"
+          appinfo["title"] = "YouTube Extended Adaptive FPS b9"
+          appinfo["version"] = "0.9.0"
           appinfo_path.write_text(json.dumps(appinfo, indent=2), encoding="utf-8")
-          print("WSOLA 4/4 retained; 13 playback speeds exposed; 325 ms near 1.25x and 350 ms elsewhere; app identity isolated.")
+          print("WSOLA 4/4 retained; 13 playback speeds; adaptive source-fps cap at 60/speed; 325 ms sync near 1.25x; app identity isolated.")
           PY
 
       - name: Format changed source and app metadata
         working-directory: app
-        run: npx prettier --write src/vendor/playback-speed/audio-engine.js src/features/playback-speed/controller.js tests/unit/playback-speed-test.cjs assets/appinfo.json
+        run: npx prettier --write src/vendor/playback-speed/audio-engine.js src/features/playback-speed/controller.js src/features/playback-speed/index.js src/features/playback-speed/frame-rate-cap.js tests/unit/playback-speed-test.cjs assets/appinfo.json
 
       - name: Regenerate code map after source changes
         working-directory: app
@@ -260,7 +374,7 @@ jobs:
         working-directory: app
         run: |
           rm -f dist/*.ipk
-          npx webpack --mode=production --env modern --env build=8
+          npx webpack --mode=production --env modern --env build=9
           mkdir -p out
           npx ares-package -n dist -o out
           ls -lh out
@@ -269,7 +383,7 @@ jobs:
       - name: Upload test IPK
         uses: actions/upload-artifact@v4
         with:
-          name: YouTube-Extended-0.8.9-b8-NanoCell-Expanded-Speeds
+          name: YouTube-Extended-0.9.0-b9-NanoCell-Adaptive-FPS
           path: app/out/*.ipk
           if-no-files-found: error
           retention-days: 30
