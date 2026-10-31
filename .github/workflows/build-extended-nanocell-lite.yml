@@ -184,30 +184,16 @@ jobs:
               raise SystemExit("Could not locate parsed response hook import.")
           index_source = index_source.replace(old_frame_import, new_frame_import)
 
-          old_parsed_step = """  setParsedObjectStep((data) => {
-            if (!isOn()) return;
-            try {
-              enableSpeedButton(data);
-            } catch (e) {
-              log.warn('Speed button:', e.message);
-            }
-            });"""
-          new_parsed_step = """  setParsedObjectStep((data) => {
-            if (!isOn()) return;
-            try {
-              enableSpeedButton(data);
-              const speed = controller.getSpeed();
-              if (speed > 1) {
-                // Limit source fps so accelerated cadence stays within 60 Hz.
-                capVideoFrameRate(data, 60 / speed);
-              }
-            } catch (e) {
-              log.warn('Speed/frame-rate cap:', e.message);
-            }
-            });"""
-          if index_source.count(old_parsed_step) != 1:
-              raise SystemExit("Could not locate parsed response callback.")
-          index_path.write_text(index_source.replace(old_parsed_step, new_parsed_step), encoding="utf-8")
+          old_enable = "      enableSpeedButton(data);"
+          new_enable = """      enableSpeedButton(data);
+                const speed = controller.getSpeed();
+                if (speed > 1) {
+                  // Limit source fps so accelerated cadence stays within 60 Hz.
+                  capVideoFrameRate(data, 60 / speed);
+                }"""
+          if index_source.count(old_enable) != 1:
+              raise SystemExit("Could not locate speed-button response hook.")
+          index_path.write_text(index_source.replace(old_enable, new_enable), encoding="utf-8")
 
           controller_path = Path("app/src/features/playback-speed/controller.js")
           controller = controller_path.read_text(encoding="utf-8")
